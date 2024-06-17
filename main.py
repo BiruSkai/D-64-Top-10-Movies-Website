@@ -5,7 +5,8 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy import Integer, String, Float
 from flask_wtf import FlaskForm
 from wtforms import StringField, SubmitField
-from wtforms.validators import DataRequired
+from wtforms.fields.numeric import FloatField
+from wtforms.validators import DataRequired, NumberRange
 import requests
 
 '''
@@ -25,6 +26,8 @@ app = Flask(__name__)
 app.config['SECRET_KEY'] = '8BYkEfBA6O6donzWlSihBXox7C0sKR6b'
 app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///top-movie-list.db"
 Bootstrap5(app)
+
+ALL_MOVIES = None
 
 
 # CREATE DB
@@ -80,12 +83,44 @@ with app.app_context():
     # db.session.commit()
 
 
+class EditForm(FlaskForm):
+    rating = FloatField(label="Your Rating out of 10, e.g 7.5", validators=[DataRequired(), NumberRange(min=0, max=10)])
+    review = StringField(label="Your Review", validators=[DataRequired()])
+    submit = SubmitField(label="Updating")
+
 @app.route("/")
 def home():
+    global ALL_MOVIES
     movies = db.session.execute(db.select(Movie).order_by(Movie.title)).scalars().all()
-    print(movies)
+    ALL_MOVIES = movies
     return render_template("index.html", movies=movies)
 
+
+@app.route("/edit/<int:index>", methods=["GET", "POST"])
+def edit(index):
+    global ALL_MOVIES
+    edit_form = EditForm()
+    if request.method == "POST":
+        updated_dict = Movie(
+            rating = edit_form.rating.data,
+            review = request.form["review"],
+
+
+        )
+        print("updated dict: ", updated_dict.review, updated_dict.rating)
+        db.session.add(updated_dict)
+        db.session.commit()
+        return redirect(url_for('home'))
+
+    if request.method == "GET":
+        for movie in ALL_MOVIES:
+            if movie.id == index:
+                return render_template("edit.html", form=edit_form, movie=movie)
+
+@app.route("/add", methods=["GET", "POST"])
+def add():
+    if request.method == "POST":
+        return redirect(url_for("home"))
 
 if __name__ == '__main__':
     app.run(debug=True)
