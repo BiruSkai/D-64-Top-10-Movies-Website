@@ -212,3 +212,6 @@
  .release_date {
 	 font-weight: normal;
 }
+.error_submit {
+    color: red;
+}

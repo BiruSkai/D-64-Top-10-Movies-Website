@@ -1,9 +1,16 @@
 {% extends 'base.html' %}
-
+{% from 'bootstrap4/form.html' import render_form %}
 {% block title %}Add Movie{% endblock %}
 
 {% block content %}
 <div class="content">
     <h1 class="heading">Add a Movie</h1>
+    <div>
+        {% if error %}
+        <p class="error_submit">There is error in submitting the latest "add movie".</p>
+        {% endif %}
+        {{ render_form(form, novalidate=True) }}
+    </div>
+
 </div>
 {% endblock %}

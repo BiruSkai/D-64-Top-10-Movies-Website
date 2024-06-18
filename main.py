@@ -5,8 +5,12 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy import Integer, String, Float
 from flask_wtf import FlaskForm
 from wtforms import StringField, SubmitField
-from wtforms.fields.numeric import FloatField
+from wtforms.fields.choices import SelectField
+from wtforms.fields.numeric import FloatField, IntegerField
+from wtforms.fields.simple import BooleanField
 from wtforms.validators import DataRequired, NumberRange
+import os
+from dotenv import load_dotenv  # pip install python-dotenv
 import requests
 
 '''
@@ -22,12 +26,38 @@ pip3 install -r requirements.txt
 This will install the packages from requirements.txt for this project.
 '''
 
+ERROR = False
+secret = load_dotenv("D:\project coding 1.1.2024\.env.txt")
+API_KEY_TMDB = os.getenv("API_KEY_TMDB")
+GET_MOVIE_URL = "https://api.themoviedb.org/3/search/movie"
+
+
+def data_add_movie(query, adult, language, page, release_year, region):
+    global GET_MOVIE_URL
+
+    params = {
+        "query": query,
+        "include_adult": adult,
+        "language": language,
+        "page": page,
+        "primary_release_year": release_year,
+        "region": region
+    }
+
+    headers = {
+        "accept": "application/json",
+        "Authorization": "Bearer eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiIwM2VkNDllYjZlNzIzZjFjNTk4YTM1MGQ4ZGM1MjVjNyIsInN1YiI6IjYzZjlkZjk0ODRmMjQ5MDBhOTQxMmQyOCIsInNjb3BlcyI6WyJhcGlfcmVhZCJdLCJ2ZXJzaW9uIjoxfQ.oYCYmiQiyGXJaTP9tD-G8WzmGpMunzKWVZz55ilHi-0"
+    }
+
+    data = requests.get(GET_MOVIE_URL, headers=headers, params=params).json()
+    fetch_movies = data["results"]
+    return fetch_movies
+
+
 app = Flask(__name__)
 app.config['SECRET_KEY'] = '8BYkEfBA6O6donzWlSihBXox7C0sKR6b'
 app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///top-movie-list.db"
 Bootstrap5(app)
-
-ALL_MOVIES = None
 
 
 # CREATE DB
@@ -84,43 +114,89 @@ with app.app_context():
 
 
 class EditForm(FlaskForm):
-    rating = FloatField(label="Your Rating out of 10, e.g 7.5", validators=[DataRequired(), NumberRange(min=0, max=10)])
+    rating = FloatField(label="Your Rating out of 10, e.g 7.5", validators=[DataRequired(), NumberRange(min=0, max=10, message="Number 1 to 5")])
     review = StringField(label="Your Review", validators=[DataRequired()])
     submit = SubmitField(label="Updating")
 
+
+class AddForm(FlaskForm):
+    title = StringField(label="Movie Title", validators=[DataRequired()])
+    include_adult = BooleanField(label="include_adult", validators=[DataRequired()])
+    language = SelectField(label="language", choices=["en-US", "en-AU", "en-UK"], validators=[DataRequired()])
+    release_year = StringField(label="release_year", validators=[DataRequired()])
+    page = IntegerField(label="page", validators=[DataRequired(), NumberRange(min=1, max=5, message="Number 1 to 5")])
+    region = SelectField(label="region", choices=["us", "uk", "au"], validators=[DataRequired()])
+    submit = SubmitField(label="Add Movie")
+
+
 @app.route("/")
 def home():
-    global ALL_MOVIES
-    movies = db.session.execute(db.select(Movie).order_by(Movie.title)).scalars().all()
-    ALL_MOVIES = movies
+    movies = db.session.execute(db.select(Movie).order_by(Movie.title)).scalars()
     return render_template("index.html", movies=movies)
 
 
-@app.route("/edit/<int:index>", methods=["GET", "POST"])
-def edit(index):
-    global ALL_MOVIES
+@app.route("/edit", methods=["GET", "POST"])
+def edit():
+    global ERROR
     edit_form = EditForm()
+    movie_id = request.args.get("id")
+    movie = db.get_or_404(Movie, movie_id)
     if request.method == "POST":
-        updated_dict = Movie(
-            rating = edit_form.rating.data,
-            review = request.form["review"],
+        if edit_form.validate_on_submit():
+            rating = edit_form.rating.data
+            review = edit_form.review.data
+            with app.app_context():
+                movie.rating = rating
+                movie.review = review
+                db.session.commit()
+            return redirect(url_for('home'))
+        else:
+            ERROR = True
+            return render_template("edit.html", form=edit_form, movie=movie, error=ERROR)
+
+    elif request.method == "GET":
+        ERROR = False
+        return render_template("edit.html", form=edit_form, movie=movie, error=ERROR)
 
 
-        )
-        print("updated dict: ", updated_dict.review, updated_dict.rating)
-        db.session.add(updated_dict)
-        db.session.commit()
-        return redirect(url_for('home'))
+@app.route("/delete")
+def delete():
+    movie_id = request.args.get("id")
+    movie_to_delete = db.get_or_404(Movie, movie_id)
+    db.session.delete(movie_to_delete)
+    db.session.commit()
+    return redirect(url_for("home"))
 
-    if request.method == "GET":
-        for movie in ALL_MOVIES:
-            if movie.id == index:
-                return render_template("edit.html", form=edit_form, movie=movie)
 
 @app.route("/add", methods=["GET", "POST"])
 def add():
+    global ERROR
+    add_form = AddForm()
     if request.method == "POST":
-        return redirect(url_for("home"))
+        if add_form.validate_on_submit():
+            ERROR = False
+            title = add_form.title.data
+            include_adult = add_form.include_adult.data
+            release_year = add_form.release_year.data
+            language = add_form.language.data
+            page = add_form.page.data
+            region = add_form.region.data
+
+            searched_movies = data_add_movie(
+                query=title,
+                adult= include_adult,
+                release_year=release_year,
+                language=language,
+                page=page,
+                region=region
+            )
+            print(len(searched_movies))
+            return render_template("select.html", movies=searched_movies)
+        else:
+            ERROR = True
+            return render_template("add.html", form=add_form, error=ERROR)
+    return render_template("add.html", form=add_form)
+
 
 if __name__ == '__main__':
     app.run(debug=True)
