@@ -28,8 +28,10 @@ This will install the packages from requirements.txt for this project.
 
 ERROR = False
 secret = load_dotenv("D:\project coding 1.1.2024\.env.txt")
-API_KEY_TMDB = os.getenv("API_KEY_TMDB")
+ACCESS_TOKEN_TMDB = os.getenv("ACCESS_TOKEN_TMDB")
 GET_MOVIE_URL = "https://api.themoviedb.org/3/search/movie"
+MOVIE_DETAIL_URL = "https://api.themoviedb.org/3/movie"
+IMG_URL ="https://image.tmdb.org/t/p/w500"
 
 
 def data_add_movie(query, adult, language, page, release_year, region):
@@ -46,7 +48,7 @@ def data_add_movie(query, adult, language, page, release_year, region):
 
     headers = {
         "accept": "application/json",
-        "Authorization": "Bearer eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiIwM2VkNDllYjZlNzIzZjFjNTk4YTM1MGQ4ZGM1MjVjNyIsInN1YiI6IjYzZjlkZjk0ODRmMjQ5MDBhOTQxMmQyOCIsInNjb3BlcyI6WyJhcGlfcmVhZCJdLCJ2ZXJzaW9uIjoxfQ.oYCYmiQiyGXJaTP9tD-G8WzmGpMunzKWVZz55ilHi-0"
+        "Authorization": f"Bearer {ACCESS_TOKEN_TMDB}"
     }
 
     data = requests.get(GET_MOVIE_URL, headers=headers, params=params).json()
@@ -74,14 +76,14 @@ db.init_app(app)
 
 # CREATE TABLE
 class Movie(db.Model):
-    id: Mapped[int] = mapped_column(primary_key=True)
-    title: Mapped[str] = mapped_column(String, unique=True)
-    year: Mapped[int] = mapped_column(Integer)
-    description: Mapped[str] = mapped_column(String)
-    rating: Mapped[float] = mapped_column(Float)
-    ranking: Mapped[int] = mapped_column(Integer)
-    review: Mapped[str] = mapped_column(String)
-    img_url: Mapped[str] = mapped_column(String)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    title: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    year: Mapped[int] = mapped_column(Integer, nullable=False)
+    description: Mapped[str] = mapped_column(String, nullable=False)
+    rating: Mapped[float] = mapped_column(Float, nullable=True)
+    ranking: Mapped[int] = mapped_column(Integer, nullable=True)
+    review: Mapped[str] = mapped_column(String, nullable=True)
+    img_url: Mapped[str] = mapped_column(String, nullable=True)
 
 
 # Create table schema in the database. Requires application context.
@@ -109,7 +111,7 @@ with app.app_context():
     #     review="I liked the water.",
     #     img_url="https://image.tmdb.org/t/p/w500/t6HIqrRAclMCA60NsSmeqe9RmNV.jpg"
     # )
-    # db.session.add(second_movie)
+    # db.session.add(new_movie)
     # db.session.commit()
 
 
@@ -121,18 +123,23 @@ class EditForm(FlaskForm):
 
 class AddForm(FlaskForm):
     title = StringField(label="Movie Title", validators=[DataRequired()])
-    include_adult = BooleanField(label="include_adult", validators=[DataRequired()])
-    language = SelectField(label="language", choices=["en-US", "en-AU", "en-UK"], validators=[DataRequired()])
-    release_year = StringField(label="release_year", validators=[DataRequired()])
-    page = IntegerField(label="page", validators=[DataRequired(), NumberRange(min=1, max=5, message="Number 1 to 5")])
-    region = SelectField(label="region", choices=["us", "uk", "au"], validators=[DataRequired()])
+    include_adult = BooleanField(label="include_adult")
+    language = SelectField(label="language", choices=["en-US", "en-AU", "en-UK"])
+    release_year = StringField(label="release_year")
+    page = IntegerField(label="page", default=1, validators=[NumberRange(min=1, max=5, message="Number 1 to 5")])
+    region = SelectField(label="region", choices=["us", "uk", "au"])
     submit = SubmitField(label="Add Movie")
 
 
 @app.route("/")
 def home():
-    movies = db.session.execute(db.select(Movie).order_by(Movie.title)).scalars()
-    return render_template("index.html", movies=movies)
+    movies_class_list = db.session.execute(db.select(Movie).order_by(Movie.rating)).scalars().all() # convert scalar to list python
+    total_movies = len(movies_class_list)
+    for i in range(total_movies):
+        print(i, movies_class_list[i])
+        movies_class_list[i].ranking = total_movies - i
+        db.session.commit()
+    return render_template("index.html", movies=movies_class_list)
 
 
 @app.route("/edit", methods=["GET", "POST"])
@@ -143,12 +150,9 @@ def edit():
     movie = db.get_or_404(Movie, movie_id)
     if request.method == "POST":
         if edit_form.validate_on_submit():
-            rating = edit_form.rating.data
-            review = edit_form.review.data
-            with app.app_context():
-                movie.rating = rating
-                movie.review = review
-                db.session.commit()
+            movie.rating = edit_form.rating.data
+            movie.review = edit_form.review.data
+            db.session.commit()
             return redirect(url_for('home'))
         else:
             ERROR = True
@@ -190,12 +194,41 @@ def add():
                 page=page,
                 region=region
             )
-            print(len(searched_movies))
+
             return render_template("select.html", movies=searched_movies)
         else:
             ERROR = True
             return render_template("add.html", form=add_form, error=ERROR)
     return render_template("add.html", form=add_form)
+
+
+@app.route("/select")
+def select():
+    global MOVIE_DETAIL_URL, IMG_URL
+    movie_id = request.args.get("id")
+
+    headers = {
+        "accept": "application/json",
+        "Authorization": f"Bearer {ACCESS_TOKEN_TMDB}"
+    }
+
+    params = {
+        "language": "en-US"
+    }
+
+    data = requests.get(url=f"{MOVIE_DETAIL_URL}/{movie_id}", headers=headers, params=params).json()
+
+    new_movie = Movie(
+        title = data["title"],
+        year = data["release_date"].split("-")[0],
+        description = data["overview"],
+        img_url = f"{IMG_URL}{data['poster_path']}",
+    )
+
+    db.session.add(new_movie)
+    db.session.commit()
+
+    return redirect(url_for("edit", id= new_movie.id))
 
 
 if __name__ == '__main__':
